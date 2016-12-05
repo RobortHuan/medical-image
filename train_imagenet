@@ -1,0 +1,137 @@
+import find_mxnet
+import mxnet as mx
+import logging
+import argparse
+import os
+import train_model
+
+import preprocessed
+
+# don't use -n and -s, which are resevered for the distributed training
+def parse_args():
+    parser = argparse.ArgumentParser(description='train an image classifer on mnist')
+    parser.add_argument('--network', type=str, default='lenet',
+                        choices = ['mlp', 'lenet'],
+                        help = 'the cnn to use')
+    parser.add_argument('--data-dir', type=str, default='./data/',
+                        help='the input data directory')
+    parser.add_argument('--gpus', type=str, default='0',
+                        help='the gpus will be used, e.g "0,1,2,3"')
+    parser.add_argument('--num-examples', type=int, default=128,
+                        help='the number of training examples')
+    parser.add_argument('--batch-size', type=int, default=1,
+                        help='the batch size')
+    parser.add_argument('--lr', type=float, default=.1,
+                        help='the initial learning rate')
+    parser.add_argument('--model-prefix', type=str,
+                        help='the prefix of the model to load/save')
+    parser.add_argument('--save-model-prefix', type=str,
+                        help='the prefix of the model to save')
+    parser.add_argument('--num-epochs', type=int, default=10,
+                        help='the number of training epochs')
+    parser.add_argument('--load-epoch', type=int,
+                        help="load the model on an epoch using the model-prefix")
+    parser.add_argument('--kv-store', type=str, default='local',
+                        help='the kvstore type')
+    parser.add_argument('--lr-factor', type=float, default=1,
+                        help='times the lr with a factor for every lr-factor-epoch epoch')
+    parser.add_argument('--lr-factor-epoch', type=float, default=1,
+                        help='the number of epoch to factor the lr, could be .5')
+    args=parser.parse_args()
+    return args
+
+# network
+def get_lenet(num_classes = 21):
+    data = mx.symbol.Variable('data')  
+    # 1 conv  
+    conv1 = mx.symbol.Convolution(data=data, kernel=(3,3), num_filter=128)  
+    bn1 = mx.symbol.BatchNorm(data=conv1)  
+    relu1 = mx.symbol.Activation(data=bn1, act_type="relu")  
+    pool1 = mx.symbol.Pooling(data=relu1, pool_type="max",  
+                              kernel=(5,5), stride=(3,3))  
+    # 2 conv  
+    conv2 = mx.symbol.Convolution(data=pool1, kernel=(3,3), num_filter=196)  
+    bn2 = mx.symbol.BatchNorm(data=conv2)  
+    relu2 = mx.symbol.Activation(data=bn2, act_type="relu")  
+    pool2 = mx.symbol.Pooling(data=relu2, pool_type="max",  
+                              kernel=(3,3), stride=(2,2))  
+    # 3 conv  
+    conv3 = mx.symbol.Convolution(data=pool2, kernel=(3,3), num_filter=196)  
+    bn3 = mx.symbol.BatchNorm(data=conv3)  
+    relu3 = mx.symbol.Activation(data=bn3, act_type="relu")  
+    pool3 = mx.symbol.Pooling(data=relu3, pool_type="max",  
+                              kernel=(2,2), stride=(2,2), name="final_pool")  
+
+    '''
+    # 4 conv  
+    conv4 = mx.symbol.Convolution(data=pool3, kernel=(3,3), num_filter=196)  
+    bn4 = mx.symbol.BatchNorm(data=conv4)  
+    relu4 = mx.symbol.Activation(data=bn4, act_type="relu")  
+    pool4 = mx.symbol.Pooling(data=relu4, pool_type="max",  
+                              kernel=(2,2), stride=(2,2)) 
+    
+    # 5 conv  
+    conv5 = mx.symbol.Convolution(data=pool4, kernel=(3,3), num_filter=196)  
+    bn5 = mx.symbol.BatchNorm(data=conv5)  
+    relu5 = mx.symbol.Activation(data=bn5, act_type="relu")  
+    pool5 = mx.symbol.Pooling(data=relu5, pool_type="max",  
+                              kernel=(2,2), stride=(2,2))  
+    
+    # 6 conv  
+    conv6 = mx.symbol.Convolution(data=pool5, kernel=(3,3), num_filter=196)  
+    bn6 = mx.symbol.BatchNorm(data=conv6)  
+    relu6 = mx.symbol.Activation(data=bn6, act_type="relu")  
+    pool6 = mx.symbol.Pooling(data=relu6, pool_type="max",  
+                              kernel=(2,2), stride=(2,2), name="final_pool")      
+    '''
+    
+    # first fullc  
+    flatten = mx.symbol.Flatten(data=pool3)  
+    fc1 = mx.symbol.FullyConnected(data=flatten, num_hidden=420)  
+    relu4 = mx.symbol.Activation(data=fc1, act_type="relu")  
+    # second fullc  
+    fc2 = mx.symbol.FullyConnected(data=relu4, num_hidden=num_classes)  
+    # loss  
+    softmax = mx.symbol.SoftmaxOutput(data=fc2, name='softmax')  
+    return softmax  
+
+#import importlib
+#net = importlib.import_module('symbol_' + args.network).get_symbol(args.num_classes)
+#net = importlib.import_module(args.network).get_symbol(args.num_classes)
+
+# data
+def get_iterator(args, kv):
+
+    data_shape = (3, preprocessed.ims_shape, preprocessed.ims_shape)
+
+    train = mx.io.ImageRecordIter(
+        path_imgrec = args.data_dir + "_train.rec",
+        mean_img    = args.data_dir + '_train.bin',
+        rand_crop   = True,
+        rand_mirror = True,        
+        data_shape  = data_shape,
+        batch_size  = args.batch_size,
+        num_parts   = kv.num_workers,
+        part_index  = kv.rank)
+
+    val = mx.io.ImageRecordIter(
+        path_imgrec = args.data_dir + "_val.rec",
+        mean_img    = args.data_dir + '_val.bin',
+        rand_crop   = False,
+        rand_mirror = False,
+        data_shape  = data_shape,
+        batch_size  = args.batch_size,
+        num_parts   = kv.num_workers,
+        part_index  = kv.rank)
+
+    return (train, val)
+
+# train
+def train():
+    net = get_lenet()
+    args = parse_args()
+    train_model.fit(args, net, get_iterator)
+    
+'''
+train()
+'''

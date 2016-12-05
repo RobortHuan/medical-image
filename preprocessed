@@ -1,0 +1,97 @@
+import os, csv, commands
+from skimage import io, transform, viewer
+import numpy as np
+
+import make_list
+
+
+np.random.seed(123)                         #定义随机数生成时所用算法开始的整数值
+
+datadir = 'data/ims'                        #文件操作的准备，相关参数的定义
+doutdir0 = 'data/ims_processed/0'
+doutdir1 = 'data/ims_processed/1'
+if not os.path.exists(doutdir0+'/'):
+    os.makedirs(doutdir0+'/')
+if not os.path.exists(doutdir1+'/'):
+    os.makedirs(doutdir1+'/')
+
+filedata = 'data/train_data.csv'
+filelabel = 'data/train_label.csv'
+
+ims_pix = 256                                #图片的尺寸                     
+ims_shape = 224
+
+def process_data():                                         #将所有图片的参数统一？
+    with open('data/openi.mesh.csv', 'rb') as csvfr:        #打开文件并保证能够关闭（错误处理机制）
+        csvr = csv.reader(csvfr, delimiter = ',')           #读取逗号分隔符文件（csv），内存图片label及图片的文件名，可以用excel打开
+    
+        #data
+        countwrite = 0
+        for row in csvr:                                    #逐行（raw）读取csv文件内的参数
+            fname = row[1]                                  #将每一行的raw视作一个一维数组，第0个元素为标签（int化），第一个元素为文件名称
+            label = int(row[0])                             
+            filename = os.path.join(datadir, fname)         #生成文件名，文件地址
+            if os.path.exists(filename):                    #如果地址已经存在      
+                im1 = np.zeros((ims_pix,ims_pix,3), np.uint8)                   #生成一个（256，224，3）的三维全零矩阵 im1
+                im00 = io.imread(filename)                                      #根据图片地址读取图片
+                im0 = transform.resize(im00, (ims_pix,ims_pix))                 #将im00图片属性转换为256*224的尺寸  （图片尺寸改变函数）
+                
+                if im0.shape[2]==3:                                             #如果im0的第三维度为3
+                    im1 = im0                                                   #将im0图片赋值给im1
+                else:                                                           #否则，将im1的各个维度均替换为im0的维度
+                    im1[0] = im0
+                    im1[1] = im0
+                    im1[2] = im0
+        
+                if label==0:                                                    #如果标签为0
+                    im2 = im1[16:(16+ims_shape),16:(16+ims_shape)]
+                    
+                    fnameNew0 = os.path.join(doutdir0, fname[:-4] + '.jpg')
+                else:            
+                    cridx1 = np.random.permutation((ims_pix-ims_shape))[0]
+                    cridx2 = np.random.permutation((ims_pix-ims_shape))[0]
+                    im2 = im1[cridx1:(cridx1+ims_shape),cridx2:(cridx2+ims_shape),:]
+                    
+                    fnameNew0 = os.path.join(doutdir1, fname[:-4] + '.jpg')
+
+            
+                io.imsave(fnameNew0, im2)
+                countwrite += 1
+                print 'process:%d %s %s' %( countwrite,fname, label)
+            else:
+                print fname, 'not exist.'       
+
+def processed(trans_raw_ims=False, make_lst=False, im2rec=False):
+    
+    #step 1 raw png image to 244x2442x3 jpg
+    if trans_raw_ims:
+        print '====raw png image to 244x2442x3 jpg'
+        process_data()
+        
+          
+    #step 2 make image list
+    if make_lst:
+        print '====make image list'
+        make_list.make_list(prefix_out='data/'
+                            , root='/home/c4isr/work/medical-images/data/ims_processed/'
+                            , recursive=True
+                            , exts=['.jpeg','.jpg']
+                            , num_chunks=1
+                            , train_ratio=0.9)
+    
+    #step 3 image to rec file
+    if im2rec:
+        print '====train image to rec file'
+        cmd = '/home/c4isr/soft/mxnet/bin/im2rec '
+        pathims = ' /home/c4isr/work/medical-images/data/ims_processed/'
+        pathsrc = ' /home/c4isr/work/medical-images/data/_train.lst'
+        pathdest = ' /home/c4isr/work/medical-images/data/_train.rec'
+        (status, output) = commands.getstatusoutput(cmd + pathsrc + pathims + pathdest)
+        print output
+        
+        print '====val image to rec file'
+        pathsrc = ' /home/c4isr/work/medical-images/data/_val.lst'
+        pathdest = ' /home/c4isr/work/medical-images/data/_val.rec'
+        (status, output) = commands.getstatusoutput(cmd + pathsrc + pathims + pathdest)        
+        print output
+           

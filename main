@@ -1,0 +1,22 @@
+import mxnet as mx
+
+import preprocessed
+import train_imagenet
+
+
+
+
+def fit():
+    (train, val) = get_iterator(args, kv)
+    
+
+def main():
+    
+    #step 1 image preprocessed
+    preprocessed.processed(trans_raw_ims=False, make_lst=False, im2rec=False)
+    
+    #step 2
+    train_imagenet.train()
+
+if __name__ == '__main__':
+    main()

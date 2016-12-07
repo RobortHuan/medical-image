@@ -5,7 +5,7 @@ Krizhevsky, Alex, Ilya Sutskever, and Geoffrey E. Hinton. "Imagenet classificati
 """
 import find_mxnet
 import mxnet as mx
-
+#2012年imagenet竞赛获胜算法 alexnet神经网络
 def get_symbol(num_classes = 1000):
     input_data = mx.symbol.Variable(name="data")
     # stage 1

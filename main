@@ -1,10 +1,6 @@
 import mxnet as mx
-
 import preprocessed
 import train_imagenet
-
-
-
 
 def fit():
     (train, val) = get_iterator(args, kv)
